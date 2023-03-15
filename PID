@@ -90,7 +90,7 @@ void loop() {
   }
 
   else if (dist < 30) {
-    else if (digitalRead(L_EYE) && digitalRead(R_EYE)) {  //if IR detects nothing
+    if (digitalRead(L_EYE) && digitalRead(R_EYE)) {  //if IR detects nothing
       Lstate = 255 - Output;
       Rstate = 255 - Output;
       Lbool = false;
