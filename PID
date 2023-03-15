@@ -91,19 +91,19 @@ void loop() {
 
   else if (dist < 30) {
     else if (digitalRead(L_EYE) && digitalRead(R_EYE)) {  //if IR detects nothing
-      Lstate = Output;
-      Rstate = Output;
+      Lstate = 255 - Output;
+      Rstate = 255 - Output;
       Lbool = false;
       Rbool = false;
     }
 
     if (Lbool && start && dist > 9) {  //if left IR triggers
       Lstate = 0; //differential steering
-      Rstate = Output;
+      Rstate = 255 - Output;
     }
 
     if (Rbool && start && dist > 9) {  //if right IR triggers
-      Lstate = Output;
+      Lstate = 255 - Output;
       Rstate = 0;
     }
 
