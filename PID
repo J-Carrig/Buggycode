@@ -113,7 +113,7 @@ void loop() {
     }
   }
 
-  else {
+  else if {
     if (digitalRead(L_EYE) && digitalRead(R_EYE)) {  //if IR detects nothing
       Lstate = 150;
       Rstate = 150;
