@@ -1,0 +1,406 @@
+#include <WiFiNINA.h>
+#include <PID_v1.h>
+
+//Setting up the credentials for our Wireless Access Point
+char ssid[]="GroupX1"; //Wifi SSID
+char pass[]="Team2022"; //Wifi password
+
+//Web server port number to 80
+WiFiServer server(80);
+
+
+int encoderA = 12;
+int encoderB = 11;
+
+int curr_stateA;
+int prev_stateA;
+int counterA = 0;
+
+int curr_stateB;
+int prev_stateB;
+int counterB = 0;
+
+double curr_time;
+double prev_time;
+int time_change;
+double speed;
+double obj_speed;
+
+
+
+
+// setting up the pins for the motors
+// motor A 
+// in1 and in2 are used to define direction of left motor
+const int in1 = 19;  
+const int in2 = 18;
+// enA is used for PWM to change the speed of left motor
+const int enA = 2; 
+
+// motor B
+// in3 and in4 are used to define direction of right motor
+const int in3 = 5;  
+const int in4 = 4;  
+// enB is used for PWM to change speed of right motor
+const int enB = 6; 
+
+// pins for IR sensors
+// left IR sensor
+const int LEYE = 17; 
+// right IR sensor 
+const int REYE = 14; 
+
+// pin ultrasonic sensor
+// pin for trigger pin
+const int triggerPin = 15 ; 
+// pin for echo pin 
+const int echoPin = 16;
+
+// defining global variables to find the distance an object is at
+float distance; 
+float duration; 
+
+// set up bool for the ultrasonic sensor. when true it means the previous distance was bigger than ten
+bool not_detected = true;
+
+//const double Kp = 16;
+const double Kp = 16;
+//const double Ki = 0.14;
+const double Ki = 0.5;
+const double Kd = 0;
+double setPoint;
+double Input;
+double Output;
+
+PID myPID(&Input, &Output, &setPoint, Kp, Ki, Kd, DIRECT);
+
+
+   
+void setup() {
+
+  Serial.begin(9600);
+
+  // motors 
+  // motor A - setting pin mode to OUTPUT
+  pinMode(enA,OUTPUT);
+  pinMode(in1,OUTPUT);
+  pinMode(in2,OUTPUT);
+  // motor B - setting pin mode to OUTPUT
+  pinMode(enB,OUTPUT);
+  pinMode(in3,OUTPUT);
+  pinMode(in4,OUTPUT);
+
+  // ir sensor - setting pin mode to INPUT
+  pinMode(LEYE,INPUT);
+  pinMode(REYE,INPUT);
+
+  // trigger pin mode set to OUTPUT since it will receive instructions from Arduino
+  pinMode(triggerPin,OUTPUT);
+  // echo pin mode set to input since it gives Arduino its state (HIGH or LOW)
+  pinMode(echoPin, INPUT);
+
+  // setting up the wireless access point
+  WiFi.beginAP(ssid, pass);
+  // printing IP of arduino to add it to processing 
+  IPAddress ip= WiFi.localIP();
+  Serial.print("IP Address:");
+  Serial.println(ip);
+  server.begin();
+
+  setPoint = 30;
+  myPID.SetOutputLimits(0,255);
+  myPID.SetMode(AUTOMATIC);
+
+  pinMode(encoderA, INPUT_PULLUP);
+  prev_stateA = digitalRead(encoderA);
+  Serial.println("first prev state ");
+  Serial.println(prev_stateA);
+
+  pinMode(encoderB, INPUT_PULLUP);
+  prev_stateB = digitalRead(encoderB);
+  Serial.println("first prev state ");
+  Serial.println(prev_stateB);
+  prev_time = millis();
+  
+}
+
+void loop() { 
+
+  float prev_distance = 11;
+
+  // look if incoming clients 
+  WiFiClient client = server.available();
+
+  // it there is a client found
+  if (client.connected()) {
+
+    int c = client.read();
+    
+    if (c == 1){
+
+       // while the bool is true we want the loop for buggy movement to repeat
+       bool turned_on = true; 
+       
+       while(turned_on) { 
+     
+        // trigger pin emits pulse of 10 microseconds 
+        digitalWrite(triggerPin, LOW);
+        delayMicroseconds(2);
+        digitalWrite(triggerPin, HIGH);
+        delayMicroseconds(10); 
+        digitalWrite(triggerPin, LOW); 
+ 
+        // listen to see if there is a pulse on the ECHO PIN detected (falling). this tells you how long it took the sound wave to reach 
+        // the object and then be detected by the receiver on the sensor
+
+        duration = pulseIn(echoPin, HIGH);
+    
+        // converting duration to distance. divide by 2 since the sound travelled to object then back
+        distance = (duration * 0.0343) /2;
+     
+        //print out the distance reported...
+        //Serial.print("Distance: ");
+        //Serial.println(distance);
+        //calculating the distance...
+
+        if (distance > 30) {
+        if(digitalRead (REYE)==LOW && digitalRead (LEYE)==LOW){
+            // turn off left motor
+            digitalWrite(in1, LOW);
+            digitalWrite(in2, LOW);
+            // turn off right motor
+            digitalWrite(in3, LOW);
+            digitalWrite(in4, LOW);
+            // set speed to 0
+            analogWrite (enA, 0);
+            analogWrite (enB, 0);
+          }
+
+          else if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == HIGH){     
+          //turn motors on
+          // left motor on
+          digitalWrite(in1, HIGH);
+          digitalWrite(in2, LOW);
+          // right motor on
+          digitalWrite(in3, HIGH);
+          digitalWrite(in4, LOW);
+          //setting motor velocity
+          // left motor speed
+          analogWrite (enA, 255);
+          // right motor speed
+          analogWrite (enB, 255); 
+          }
+        
+        else if(digitalRead(REYE) == LOW && digitalRead(LEYE) == HIGH){
+          // turn on right motor to turn left
+          // left motor on
+          digitalWrite(in1, HIGH);
+          digitalWrite(in2, LOW);
+          // left motor off
+          digitalWrite(in3, LOW);
+          digitalWrite(in4, LOW);
+          // set motor velocity
+          // left motor speed is set to 180, so not max speed 
+          analogWrite (enA, 255);
+          // right motor speed is null
+          analogWrite (enB, 0);
+          } 
+
+          else if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == LOW){
+          // turn on left motor to turn right
+          // left motor off
+          digitalWrite(in1, LOW);
+          digitalWrite(in2, LOW);
+          // right motor on
+          digitalWrite(in3, HIGH);
+          digitalWrite(in4, LOW);
+          // left motor speed is null
+          analogWrite (enA, 0);
+          // right motor speed is set to 180, so not max speed
+          analogWrite (enB, 255); 
+         }
+        }
+
+        if (distance < 30) { 
+        Input = distance;
+
+        myPID.Compute();
+        // if both IR sensors detect a white line (they are low) then stop motors 
+        if(digitalRead (REYE)==LOW && digitalRead (LEYE)==LOW){
+            // turn off left motor
+            digitalWrite(in1, LOW);
+            digitalWrite(in2, LOW);
+            // turn off right motor
+            digitalWrite(in3, LOW);
+            digitalWrite(in4, LOW);
+            // set speed to 0
+            analogWrite (enA, 0);
+            analogWrite (enB, 0);
+          }
+  
+        // if the distance is less than or equal to 10 then we want buggy to stop
+        else if (distance <= 10){
+
+          // turn off motors if object detected
+          digitalWrite(in1, LOW);
+          digitalWrite(in2, LOW);
+          digitalWrite(in3, LOW);
+          digitalWrite(in4, LOW);
+          delay(100);
+
+          // we want to print "Stopped" only the first time the object is detected 
+          while(not_detected){
+            client.print("Obstacle seen: ");
+            client.println(distance);
+            // set bool to false so that it doesnt print on next loop
+            not_detected = false;
+          }  
+        }
+     
+        // if the previous distance was less than or equal to 10 but current distance is more this means object is gone
+        // print that its removed
+        else if ((prev_distance <= 10) && (distance > 10)){
+          client.println("Obstacle removed");
+          // set bool to true so that we can print "stopped" next time an object is placed 
+          not_detected = true;
+        }
+         
+
+        // if no line detected, so sensors are HIGH, we want buggy to go straight so both motor are on
+        else if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == HIGH){     
+          //turn motors on
+          // left motor on
+          digitalWrite(in1, HIGH);
+          digitalWrite(in2, LOW);
+          // right motor on
+          digitalWrite(in3, HIGH);
+          digitalWrite(in4, LOW);
+          //setting motor velocity
+          // left motor speed
+          analogWrite (enA, (255-Output));
+          // right motor speed
+          analogWrite (enB, (255-Output)); 
+          }
+          
+
+        // if left sensor detects line, is LOW, but right sensor is HIGH then we want the buggy to turn left
+        else if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == LOW){
+          // turn on left motor to turn right
+          // left motor off
+          digitalWrite(in1, LOW);
+          digitalWrite(in2, LOW);
+          // right motor on
+          digitalWrite(in3, HIGH);
+          digitalWrite(in4, LOW);
+          // left motor speed is null
+          analogWrite (enA, 0);
+          // right motor speed is set to 180, so not max speed
+          analogWrite (enB, (255-Output)); 
+         }
+      
+
+        // if right sensor dtects line, is LOW, but left sensor is HIGH then we want buggy to turn right
+        else if(digitalRead(REYE) == LOW && digitalRead(LEYE) == HIGH){
+          // turn on right motor to turn left
+          // left motor on
+          digitalWrite(in1, HIGH);
+          digitalWrite(in2, LOW);
+          // left motor off
+          digitalWrite(in3, LOW);
+          digitalWrite(in4, LOW);
+          // set motor velocity
+          // left motor speed is set to 180, so not max speed 
+          analogWrite (enA, (255-Output));
+          // right motor speed is null
+          analogWrite (enB, 0);
+          } 
+          
+        }
+
+        curr_time = millis();
+  
+        curr_stateA = digitalRead(encoderA);
+        curr_stateB = digitalRead(encoderB);
+       
+        if (digitalRead(REYE) == HIGH && digitalRead(LEYE) == HIGH) {
+          if (curr_stateA != prev_stateA) {
+            counterA++;
+            counterB++;
+          }
+        }
+
+        else if (digitalRead(REYE) == HIGH && digitalRead(LEYE) == LOW) {
+          if (curr_stateB != prev_stateB) {
+            counterB++;
+          }
+        }
+
+        else if (digitalRead(LEYE) == HIGH && digitalRead(REYE) == LOW){
+          if (curr_stateA != prev_stateA) {
+            counterA++;
+          }
+        }
+
+        Serial.print("Counter A ");
+        Serial.println(counterA);
+        Serial.print("Counter B ");
+        Serial.println(counterB);
+
+        if ((counterA == 480) || (counterB == 480)) {
+          time_change = curr_time - prev_time;
+          //client.print("Time change ");
+          //client.println(time_change);
+
+          speed = 6.5 * PI / (time_change / 1000);
+          client.print("Buggy Speed: ");
+          client.print(speed);
+          client.print("cm/s");
+
+          counterA = 0;
+          counterB = 0;
+          prev_time = curr_time;
+
+          // if the distance is 30 then this means same speed
+            if (distance == 30) {
+              obj_speed = speed; 
+            }
+
+            // if the distance > 30 then obj in front faster than buggy
+            // if distance < 30 then obj in front slower than buggy
+            else {
+            obj_speed = speed + ((distance - 30) / (time_change / 1000) );
+            }
+            
+          client.print(" Object speed: ");
+          client.print(obj_speed);
+          client.println("cm/s");
+
+        }
+
+        prev_stateA = curr_stateA;
+        prev_stateB = curr_stateB;      
+
+        // check if processing client has sent in a new int 
+        int c = client.read();
+
+        // if its received a 2, it means the OFF button has been pressed, turn off motors
+        if(c == 2){
+          turned_on = false;
+          Serial.println("Motor stopped");
+          digitalWrite(in1, LOW);
+          digitalWrite(in2, LOW);
+          digitalWrite(in3, LOW);
+          digitalWrite(in4, LOW);     
+
+          // set counter to 0
+          counterA = 0;
+          counterB = 0;
+          prev_time = curr_time;
+        }
+
+        // update value of the distance for next loop to compare 
+        prev_distance = distance;
+      }
+    }
+  }
+}
