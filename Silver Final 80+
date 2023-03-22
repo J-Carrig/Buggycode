@@ -1,1 +1,404 @@
+#include <WiFiNINA.h>
+#include <PID_v1.h>
 
+//Setting up the credentials for our Wireless Access Point
+char ssid[]="GroupX1"; //Wifi SSID
+char pass[]="Team2022"; //Wifi password
+
+//Web server port number to 80
+WiFiServer server(80);
+WiFiClient client;
+
+// setting up the pins for the motors
+// motor A 
+// in1 and in2 are used to define direction of left motor
+const int in1 = 19;  
+const int in2 = 18;
+// enA is used for PWM to change the speed of left motor
+const int enA = 2; 
+
+// motor B
+// in3 and in4 are used to define direction of right motor
+const int in3 = 5;  
+const int in4 = 4;  
+// enB is used for PWM to change speed of right motor
+const int enB = 6; 
+
+// pins for IR sensors
+// left IR sensor
+const int LEYE = 17; 
+// right IR sensor 
+const int REYE = 14; 
+
+// pin ultrasonic sensor
+// pin for trigger pin
+const int triggerPin = 15 ; 
+// pin for echo pin 
+const int echoPin = 16;
+
+// defining global variables to find the distance an object is at
+// set up variables for the PID
+float distance; 
+float duration; 
+int stopPoint = 10;
+double setPoint = 30;
+int maxRange = 70;
+
+const double kp = 6;
+const double ki = 6/25;
+const double kd = 0.01;
+// kd = 0.005
+
+double Input;
+double Output;
+double speed;
+
+
+PID myPID(&Input, &Output, &setPoint, kp, ki, kd, DIRECT);
+
+// set up bool for the ultrasonic sensor. when true it means the previous distance was bigger than ten
+bool not_detected = true;
+
+// set up variables to find the speed of buggy and object
+const int encoder = 12;
+int counter = 0;
+double buggy_speed;
+double obj_speed;
+double circumference = 6.5 * PI;
+double curr_time;
+double prev_time;
+double time_change;
+int curr_state;
+int prev_state;
+
+bool calculated = false;
+   
+void setup() {
+
+  Serial.begin(9600);
+
+  // motors 
+  // motor A - setting pin mode to OUTPUT
+  pinMode(enA,OUTPUT);
+  pinMode(in1,OUTPUT);
+  pinMode(in2,OUTPUT);
+  // motor B - setting pin mode to OUTPUT
+  pinMode(enB,OUTPUT);
+  pinMode(in3,OUTPUT);
+  pinMode(in4,OUTPUT);
+
+  // ir sensor - setting pin mode to INPUT
+  pinMode(LEYE,INPUT);
+  pinMode(REYE,INPUT);
+
+  // trigger pin mode set to OUTPUT since it will receive instructions from Arduino
+  pinMode(triggerPin,OUTPUT);
+  // echo pin mode set to input since it gives Arduino its state (HIGH or LOW)
+  pinMode(echoPin, INPUT);
+
+  // setting up the wireless access point
+  WiFi.beginAP(ssid, pass);
+  // printing IP of arduino to add it to processing 
+  IPAddress ip= WiFi.localIP();
+  Serial.print("IP Address:");
+  Serial.println(ip);
+  server.begin();
+
+  myPID.SetMode(AUTOMATIC);
+  // set pid output limits to ensure motors move and following of the line is reliable
+  // we use 55 to 255 whereas others would use 0 to 200. our PID seems to work in the reverse
+  // here we are saying that we want the speed to be limited within 0 to 200.
+  // when using speed = output the buggy moved faster when object closer
+  myPID.SetOutputLimits(55, 255); 
+
+  pinMode(encoder, INPUT_PULLUP);
+  prev_state = digitalRead(encoder);
+  prev_time = millis();
+}
+
+
+void loop() { 
+
+  float prev_distance = 11;
+
+  // look if incoming clients 
+  WiFiClient client = server.available();
+
+  // it there is a client found
+  if (client.connected()) {
+
+    int c = client.read();
+    
+    // if user has pressed the on button
+    if (c == 1){
+
+       // while the bool is true we want the loop for buggy movement to repeat
+       bool turned_on = true; 
+       
+       while(turned_on) { 
+     
+        CalculateDistance();
+        //print out the distance reported...
+        Serial.print("Distance: ");
+        Serial.println(distance);
+        
+        // if both IR sensors detect a white line (they are low) then stop motors 
+        if(digitalRead (REYE)==LOW && digitalRead (LEYE)==LOW){
+          // turn off left motor
+          stopMoving();
+        }
+
+        else if (distance <= stopPoint) {
+          // turn off motors if object detected
+          stopMoving();
+          delay(100);
+
+          // we want to print "Stopped" only the first time the object is detected 
+          while(not_detected){
+            client.print("Obstacle seen: ");
+            client.println(distance);
+            // set bool to false so that it doesnt print on next loop
+            not_detected = false;
+          }          
+        }
+
+        else if (prev_distance <= stopPoint && distance > stopPoint) {
+          client.println("Obstacle removed");
+          // set bool to true so that we can print "stopped" next time an object is placed 
+          not_detected = true;          
+        }
+
+        // if distance below 70 we assume there is an object to follow
+        // if distance between 10 and 30cm then the buggy will have to adjust its speed
+        else if (distance > stopPoint && distance <= setPoint) {
+          Input = distance;
+          Serial.println("PID calculated");
+          myPID.Compute();
+          Serial.println(Output);
+
+          // we do 255 - output since our pid works in reverse unlike others...
+          // when using speed = output the buggy moved faster when object closer
+          speed = 255 - Output;
+          moveNormally();
+
+          //client.println("Object detected within the 30cm range, speed adjusted");
+
+          // want to calculate buggy and object speed
+          curr_time = millis();
+          Serial.print("current time ");
+          Serial.println(curr_time);
+          curr_state = digitalRead(encoder);
+          Serial.print("current state ");
+          Serial.println(curr_state);
+
+          if (curr_state != prev_state){
+            counter++;
+          }
+
+          Serial.print("counter ");
+          Serial.println(counter);
+
+          // only calculate the speed when the encoder has rotated 120 times, recording 4 pulses
+          // 120:1 so wheel will turn once when encoder rotates 120 times
+          if (counter == 480) {
+            time_change = (curr_time - prev_time) / 1000;
+            buggy_speed = circumference / time_change;
+
+            client.print("Buggy Speed: ");
+            client.print(buggy_speed);
+            client.print(" ");
+
+            // calculate the object speed
+            obj_speed = buggy_speed + ((30 - distance) / time_change);
+            client.print("Object speed: ");
+            client.println(obj_speed);
+
+            // reset the variables
+            prev_time = curr_time;
+            counter = 0;
+          }
+
+        }
+
+        // when distance bigger than 30cm the buggy always moves at max speed = 200 value
+        else {
+
+          speed = 200;
+          moveNormally();
+
+          // we assume that the buggy detects an object within the 70cm range therefore we would still print its speed
+          if (distance <= 70) {
+            // need to find buggy speed (which will be maximum) and obj speed which is faster than buggy
+            //client.println("Object within 70cm but no need to reduce speed");
+            curr_time = millis();
+            Serial.print("current time ");
+            Serial.println(curr_time);
+            curr_state = digitalRead(encoder);
+            Serial.print("current state ");
+            Serial.println(curr_state);
+
+            if (curr_state != prev_state){
+              counter++;
+            }
+
+            Serial.print("counter ");
+            Serial.println(counter);
+
+            // find the speed of object and buggy
+            if (counter == 480) {
+              time_change = (curr_time - prev_time) / 1000;
+              buggy_speed = circumference / time_change;
+
+              client.print("Buggy Speed: ");
+              client.print(buggy_speed);
+              client.print(" ");
+
+              // calculate the object speed
+              obj_speed = buggy_speed + ((distance - 30) / time_change);
+              client.print("Object speed: ");
+              client.println(obj_speed);
+
+              // update the variable
+              prev_time = curr_time;
+              counter = 0;
+            }
+          }
+          
+          // if above 70cm then we assume that there is no object
+          else {
+            // no object so no need to print object speed
+            // only print buggy speed
+            //client.println("No object detected");
+
+            curr_time = millis();
+            Serial.print("current time ");
+            Serial.println(curr_time);
+            curr_state = digitalRead(encoder);
+            Serial.print("current state ");
+            Serial.println(curr_state);
+
+            if (curr_state != prev_state){
+              counter++;
+            }
+
+            Serial.print("counter ");
+            Serial.println(counter);
+
+            // find buggy speed when applicable 
+            if (counter == 480) {
+              time_change = (curr_time - prev_time) / 1000;
+              buggy_speed = circumference / time_change;
+
+              client.print("Buggy Speed: ");
+              client.println(buggy_speed);
+
+              // update the variables
+              prev_time = curr_time;
+              counter = 0;
+            }
+          }
+          
+        }
+          
+        // check if processing client has sent in a new int 
+        int c = client.read();
+
+        // if its received a 2, it means the OFF button has been pressed, turn off motors
+        if (c == 2){
+          turned_on = false;
+          Serial.println("Motor stopped");
+          stopMoving();   
+        }
+
+        // update value of the distance for next loop to compare 
+        prev_distance = distance;
+      }
+    }
+  }
+}
+
+void CalculateDistance() {
+  // trigger pin emits pulse of 10 microseconds 
+  digitalWrite(triggerPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin, HIGH);
+  delayMicroseconds(10); 
+  digitalWrite(triggerPin, LOW); 
+ 
+  // listen to see if there is a pulse on the ECHO PIN detected (falling). this tells you how long it took the sound wave to reach 
+  // the object and then be detected by the receiver on the sensor
+
+  duration = pulseIn(echoPin, HIGH);
+    
+  // converting duration to distance. divide by 2 since the sound travelled to object then back
+  distance = (duration * 0.0343) /2;
+     
+  //print out the distance reported...
+  Serial.print("Distance: ");
+  Serial.println(distance);
+}
+
+
+
+void moveNormally() {
+  // if no line detected by sensors then go straight
+  if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == HIGH){     
+    moveForward();
+  }
+          
+  // if left sensor detects line, is LOW, but right sensor is HIGH then we want the buggy to turn left
+  else if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == LOW){   
+    moveLeft();
+  }
+      
+  // if right sensor dtects line, is LOW, but left sensor is HIGH then we want buggy to turn right
+  else if(digitalRead(REYE) == LOW && digitalRead(LEYE) == HIGH){
+    // turn on right motor to turn left
+    // left motor on
+    moveRight();
+  } 
+}
+
+void moveForward() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  // turn off right motor
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  // set speed to output
+  analogWrite(enA, speed);
+  analogWrite(enB, speed);
+}
+
+
+void moveLeft() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  // turn off right motor
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  // set speed to output
+  analogWrite(enA, 0);
+  analogWrite(enB, speed);
+}
+
+
+void moveRight() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  // turn off right motor
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+  // set speed to output
+  analogWrite(enA, speed);
+  analogWrite(enB, 0);
+}
+
+
+void stopMoving() {
+  // turn off both motors
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+}
