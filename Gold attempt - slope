@@ -1,0 +1,267 @@
+#include <WiFiNINA.h>
+#include <PID_v1.h>
+#include <Arduino_LSM6DS3.h>
+
+//Setting up the credentials for our Wireless Access Point
+char ssid[]="GroupX1"; //Wifi SSID
+char pass[]="Team2022"; //Wifi password
+
+//Web server port number to 80
+WiFiServer server(80);
+WiFiClient client;
+
+// pins for IR sensors
+// left IR sensor
+const int LEYE = 17; 
+// right IR sensor 
+const int REYE = 14; 
+
+// set up variables for the PID
+float distance = 0; 
+float duration = 0; 
+
+// setting up the pins for the motors
+// motor A 
+// in1 and in2 are used to define direction of left motor
+const int in1 = 19;  
+const int in2 = 18;
+// enA is used for PWM to change the speed of left motor
+const int enA = 2; 
+
+// motor B
+// in3 and in4 are used to define direction of right motor
+const int in3 = 5;  
+const int in4 = 4;  
+// enB is used for PWM to change speed of right motor
+const int enB = 6; 
+
+// pin ultrasonic sensor
+// pin for trigger pin
+const int triggerPin = 15 ; 
+// pin for echo pin 
+const int echoPin = 16;
+
+bool incline_detected = false;
+bool decline_detected = false;
+double acceleration = 0;
+double normal_speed = 200;
+double base_speed = 200;
+
+float aX = 0, aY = 0, aZ = 0;
+float gX = 0, gY = 0, gZ = 0;
+
+const double kp = 6;
+const double ki = 6/25;
+const double kd = 10;
+// kd = 0.005
+
+double Input = 0;
+double Output = 0;
+double setPoint = 0;
+
+
+PID myPID(&Input, &Output, &setPoint, kp, ki, kd, DIRECT);
+
+
+void setup() {
+  // put your setup code here, to run once:
+
+  Serial.begin(9600);
+
+  // motors 
+  // motor A - setting pin mode to OUTPUT
+  pinMode(enA,OUTPUT);
+  pinMode(in1,OUTPUT);
+  pinMode(in2,OUTPUT);
+  // motor B - setting pin mode to OUTPUT
+  pinMode(enB,OUTPUT);
+  pinMode(in3,OUTPUT);
+  pinMode(in4,OUTPUT);
+
+  // trigger pin mode set to OUTPUT since it will receive instructions from Arduino
+  pinMode(triggerPin,OUTPUT);
+  // echo pin mode set to input since it gives Arduino its state (HIGH or LOW)
+  pinMode(echoPin, INPUT);
+
+  // setting up the wireless access point
+  WiFi.beginAP(ssid, pass);
+  // printing IP of arduino to add it to processing 
+  IPAddress ip= WiFi.localIP();
+  Serial.print("IP Address:");
+  Serial.println(ip);
+  server.begin();
+
+  myPID.SetMode(AUTOMATIC);
+  // set pid output limits to ensure motors move and following of the line is reliable
+  // we use 55 to 255 whereas others would use 0 to 200. our PID seems to work in the reverse
+  // here we are saying that we want the speed to be limited within 0 to 200.
+  // when using speed = output the buggy moved faster when object closer
+  myPID.SetOutputLimits(200, 255);  
+
+  Input = acceleration;
+
+  //check if IMU initilialized
+  if (!IMU.begin()) {
+    Serial.println("IMU didn't initialize");
+  }
+
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+
+
+float prev_distance = 11;
+
+  // look if incoming clients 
+  WiFiClient client = server.available();
+
+  // it there is a client found
+  if (client.connected()) {
+
+    int c = client.read();
+    
+    // if user has pressed the on button
+    if (c == 1){
+
+      // while the bool is true we want the loop for buggy movement to repeat
+      bool turned_on = true; 
+       
+      
+      while(turned_on) {
+        Serial.println("still connected");  
+      
+
+      if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+        IMU.readAcceleration(aX, aY, aZ);
+        IMU.readGyroscope(gX, gY, gZ);
+        Serial.println("true");
+        acceleration = aY;
+
+        Serial.println(gX);
+        if (gX > 5) {
+          
+          // means that previously on hill
+          if (incline_detected) {
+
+            Input = acceleration * 100;
+            Serial.print("aY ");
+            Serial.println(aY);
+            //myPID.Compute();
+            //Serial.print("Output Speed ");
+            //Serial.println(Output);
+
+            //normal_speed = base_speed + (255 - Output);
+            Serial.print("Normal Speed ");
+            Serial.println(normal_speed);
+            moveNormally();
+          }
+
+          else {
+            Serial.println("Hill Detected!");
+            incline_detected = true;
+            decline_detected = false;
+          }
+        }
+
+        else if (gX < -5) {
+          // frist detection of decline
+          if (incline_detected && !decline_detected) {
+            decline_detected = true;
+            incline_detected = false;
+          }
+
+          else {
+            normal_speed = 130;
+            moveNormally();
+            Serial.print("Normal Speed ");
+            Serial.println(normal_speed);           
+          }
+
+          Serial.println(turned_on);
+        }
+
+        delay(2000);
+      }
+          
+        // check if processing client has sent in a new int 
+      int c = client.read();
+
+        // if its received a 2, it means the OFF button has been pressed, turn off motors
+      if (c == 2){
+        turned_on = false;
+        Serial.println("Motor stopped");
+        stopMoving();   
+      }
+
+        // update value of the distance for next loop to compare 
+      prev_distance = distance;
+      }
+    }
+  }
+}
+
+
+
+void moveNormally() {
+  // if no line detected by sensors then go straight
+  if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == HIGH){     
+    moveForward();
+  }
+          
+  // if left sensor detects line, is LOW, but right sensor is HIGH then we want the buggy to turn left
+  else if(digitalRead(REYE) == HIGH && digitalRead(LEYE) == LOW){   
+    moveLeft();
+  }
+      
+  // if right sensor dtects line, is LOW, but left sensor is HIGH then we want buggy to turn right
+  else if(digitalRead(REYE) == LOW && digitalRead(LEYE) == HIGH){
+    // turn on right motor to turn left
+    // left motor on
+    moveRight();
+  } 
+}
+
+void moveForward() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  // turn off right motor
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  // set speed to output
+  analogWrite(enA, normal_speed);
+  analogWrite(enB, normal_speed);
+}
+
+
+void moveLeft() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  // turn off right motor
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  // set speed to output
+  analogWrite(enA, 0);
+  analogWrite(enB, normal_speed);
+}
+
+
+void moveRight() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  // turn off right motor
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+  // set speed to output
+  analogWrite(enA, normal_speed);
+  analogWrite(enB, 0);
+}
+
+
+void stopMoving() {
+  // turn off both motors
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+}
