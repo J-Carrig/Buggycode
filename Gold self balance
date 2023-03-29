@@ -1,0 +1,53 @@
+#include <Arduino_LSM6DS3.h>
+const int IN1 = 4;   //1A and 3A
+const int IN2 = 5;
+const int IN3 = 10;
+const int IN4 = 12;  //2A and 4A
+const int L_SPEED = 17;   //12EN
+const int R_SPEED = 16; 
+
+
+void setup() {
+  Serial.begin(9600);
+  IMU.begin();
+
+  pinMode(IN1, OUTPUT);  
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(L_SPEED, OUTPUT);
+  pinMode(R_SPEED, OUTPUT);
+
+}
+
+void loop() {
+  float aX, aY, aZ;
+  float gX, gY, gZ;
+  const char * spacer = ", ";
+
+  if (
+    IMU.accelerationAvailable() 
+    && IMU.gyroscopeAvailable()
+  ) {      
+    IMU.readAcceleration(aX, aY, aZ);
+    IMU.readGyroscope(gX, gY, gZ);
+    Serial.print(aY); Serial.print(spacer);
+    Serial.println(aZ);
+
+    delay(0);
+  }
+  analogWrite(L_SPEED, (255*0.85));
+  analogWrite(R_SPEED, (255*0.85));
+  if (aY < -0.85 && aZ > 0.3) {
+      digitalWrite(IN1, LOW);  //move forward
+      digitalWrite(IN2, HIGH);
+      digitalWrite(IN3, LOW);
+      digitalWrite(IN4, HIGH);}
+
+
+  if (aY < -0.85 && aZ < 0.3) {
+      digitalWrite(IN1, HIGH);  //move forward
+      digitalWrite(IN2, LOW);
+      digitalWrite(IN3, HIGH);
+      digitalWrite(IN4, LOW);}
+}
