@@ -1,4 +1,5 @@
 #include <Arduino_LSM6DS3.h>
+#include <WiFiNINA.h>
 const int IN1 = 4;   //1A and 3A
 const int IN2 = 5;
 const int IN3 = 10;
@@ -6,10 +7,20 @@ const int IN4 = 12;  //2A and 4A
 const int L_SPEED = 17;   //12EN
 const int R_SPEED = 16; 
 
+const char SSID[] = "X1 gold";  //Hotspot name and password
+const char PASSWORD[] = "supersonic";
+WiFiServer server(4800);  //Server port
+bool start = false;       //Updates via wifi to start and stop the buggy
 
 void setup() {
   Serial.begin(9600);
   IMU.begin();
+
+ WiFi.beginAP(SSID, PASSWORD);
+  delay(5000);  //Make sure wifi is connected
+  IPAddress ip = WiFi.localIP();
+  Serial.print(ip);  //In case IP address changes
+  server.begin();
 
   pinMode(IN1, OUTPUT);  
   pinMode(IN2, OUTPUT);
@@ -21,6 +32,17 @@ void setup() {
 }
 
 void loop() {
+  WiFiClient client = server.available();  //create client object for processing
+  if (client.connected()) {  //read a character from processing
+    char ch = client.read();
+    if (ch == 'w') {  //determine if buggy should start or stop
+      start = true;
+    }
+
+    else if (ch == 's'){
+      start = false;
+    }
+  }
   float aX, aY, aZ;
   float gX, gY, gZ;
   const char * spacer = ", ";
@@ -28,7 +50,8 @@ void loop() {
   if (
     IMU.accelerationAvailable() 
     && IMU.gyroscopeAvailable()
-  ) {      
+    && start
+  ) {     
     IMU.readAcceleration(aX, aY, aZ);
     IMU.readGyroscope(gX, gY, gZ);
     Serial.print(aY); Serial.print(spacer);
@@ -36,18 +59,27 @@ void loop() {
 
     delay(0);
   }
-  analogWrite(L_SPEED, (255*0.85));
-  analogWrite(R_SPEED, (255*0.85));
-  if (aY < -0.85 && aZ > 0.3) {
+  if(start){
+  analogWrite(L_SPEED, (255*0.9));
+  analogWrite(R_SPEED, (255*0.9));
+ 
+  
+  if (aY < -0.85 && aZ > 0.2) {
       digitalWrite(IN1, LOW);  //move forward
       digitalWrite(IN2, HIGH);
       digitalWrite(IN3, LOW);
       digitalWrite(IN4, HIGH);}
 
 
-  if (aY < -0.85 && aZ < 0.3) {
+  if (aY < -0.85 && aZ < 0.2) {
       digitalWrite(IN1, HIGH);  //move forward
       digitalWrite(IN2, LOW);
       digitalWrite(IN3, HIGH);
       digitalWrite(IN4, LOW);}
+  }
+  
+  if(!start){
+    analogWrite(L_SPEED, (255*0));
+    analogWrite(R_SPEED, (255*0));
+  }
 }
