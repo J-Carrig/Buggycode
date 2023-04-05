@@ -1,0 +1,44 @@
+import controlP5.*;
+import processing.net.*;
+
+ControlP5 cp5;
+Client arduino;
+String data;
+PFont font1;
+
+void setup() {
+ 
+  size(300, 300);
+  cp5 = new ControlP5(this);
+  arduino = new Client(this, "192.168.4.1", 4800);
+
+font1 = createFont("Metal Gear", 20); //this uses a custom font BEWARE
+
+  cp5.addButton("Go")
+     .setValue(0)
+     .setPosition(75, 25)
+     .setSize(150, 100)
+     .setFont(font1);
+     
+   cp5.addButton("Stop")
+       .setValue(0)
+       .setPosition(75, 175)
+       .setSize(150, 100)
+       .setFont(font1);
+}
+
+void draw() {}
+
+public void Go(int theValue) {
+  if (arduino.active()) {
+    arduino.write("w");
+    println("Go");
+  }
+}
+
+public void Stop(int theValue) {
+  if (arduino.active()) {
+    arduino.write("s");
+    println("Stop");
+  }
+}
