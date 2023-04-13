@@ -36,14 +36,14 @@ void draw() {
   }
 }
 
-public void Go(int theValue) {
+void Go() {
   if (client.active()) {
     client.write("w");
     println("Go");
   }
 }
 
-public void Stop(int theValue) {
+void Stop() {
   if (client.active()) {
     client.write("s");
     println("Stop");
