@@ -1,0 +1,173 @@
+#include <Arduino_LSM6DS3.h>
+#include <WiFiNINA.h>
+const int IN1 = 4;   //1A and 3A
+const int IN2 = 5;
+const int IN3 = 10;
+const int IN4 = 12;  //2A and 4A
+const int L_SPEED = 17;   //12EN
+const int R_SPEED = 16; 
+
+const char SSID[] = "X1 gold";  //Hotspot name and password
+const char PASSWORD[] = "supersonic";
+WiFiServer server(4800);  // first server which sends buggy speed
+WiFiServer server2(5000); // second server to sends buggy angle of wheel rotation
+bool start = false;       //Updates via wifi to start and stop the buggy
+
+// declare variables linked to encoder
+const int encoder = 3;
+int encoderCounter = 0;
+double circumference = 6.5 * PI;
+int curr_state;
+int prev_state;
+double curr_time;
+double prev_time = 0;
+double time_change;
+int buggy_speed;
+
+bool forward = false;
+bool backward = false;
+int type;
+int prev_type = 0;
+double prevAngleTime = 0;
+double timeDifference;
+int revolutions = 0;
+int total_revolutions = 120 * 4;
+double angle;
+
+
+void setup() {
+  Serial.begin(9600);
+  IMU.begin();
+
+  WiFi.beginAP(SSID, PASSWORD);
+  delay(5000);  //Make sure wifi is connected
+  IPAddress ip = WiFi.localIP();
+  Serial.print(ip);  //In case IP address changes
+  server.begin();
+  server2.begin();
+
+  pinMode(IN1, OUTPUT);  
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  pinMode(L_SPEED, OUTPUT);
+  pinMode(R_SPEED, OUTPUT);
+
+  // encoder
+  pinMode(encoder, INPUT_PULLUP);
+  prev_state = digitalRead(encoder);
+ 
+}
+
+void loop() {
+  WiFiClient client = server.available();  //create client object for processing
+  if (client.connected()) {  //read a character from processing
+    char ch = client.read();
+    if (ch == 'w') {  //determine if buggy should start or stop
+      start = true;
+    }
+
+    else if (ch == 's'){
+      start = false;
+    }
+  }
+
+  float aX, aY, aZ;
+  float gX, gY, gZ;
+  const char * spacer = ", ";
+
+  if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable() && start) {     
+    IMU.readAcceleration(aX, aY, aZ);
+    IMU.readGyroscope(gX, gY, gZ);
+    //Serial.print(aY); 
+    //Serial.print(spacer);
+    //Serial.println(aZ);
+
+    delay(0);
+  }
+
+  if(start){
+  analogWrite(L_SPEED, (255*0.9));
+  analogWrite(R_SPEED, (255*0.9));
+
+    if (aY < -0.85 && aZ > 0.2) {
+      if (!forward) {
+        // now going forward
+        forward = true;
+        backward = false;
+        //Serial.print("value of forward");
+        //Serial.println(forward);
+      }
+      digitalWrite(IN1, LOW);  //move forward
+      digitalWrite(IN2, HIGH);
+      digitalWrite(IN3, LOW);
+      digitalWrite(IN4, HIGH);
+    }
+
+    if (aY < -0.85 && aZ < 0.2) {
+      if (!backward) {
+        forward = false;
+        backward = true;
+        //Serial.print("value of backward");
+        //Serial.println(backward);
+      }
+      digitalWrite(IN1, HIGH);  //move backwards
+      digitalWrite(IN2, LOW);
+      digitalWrite(IN3, HIGH);
+      digitalWrite(IN4, LOW);
+    }
+    else {
+      forward = false;
+      backward = false;
+    }
+
+    // calculate speed using encoder
+  curr_time = millis();
+  curr_state = digitalRead(encoder);
+    
+  if (curr_state == prev_state){
+    encoderCounter++;
+
+
+  }
+
+  // find buggy speed when applicable 
+  if (encoderCounter == 480) {
+    time_change = (curr_time - prev_time) / 1000;
+    buggy_speed = circumference / time_change / 2.3;
+
+    // update the variables
+    prev_time = curr_time;
+    encoderCounter = 0;
+    String speed = String(buggy_speed);
+    if (speed != NULL){
+    // send to first server client
+    server.println(speed);
+    Serial.println(buggy_speed);}
+  }
+
+  // we also want to give the angle of revolution 
+  
+  
+  }
+
+  if(!start){
+    analogWrite(L_SPEED, (255*0));
+    analogWrite(R_SPEED, (255*0));
+  }
+
+  if (forward) {
+    type = 1;    
+  }
+  else if (backward) {
+    type = 2;
+  }
+  else type = 3;
+
+  
+  
+
+  
+
+  prev_type = type;
+}
