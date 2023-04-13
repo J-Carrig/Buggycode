@@ -2,9 +2,8 @@ import controlP5.*;
 import processing.net.*;
 
 ControlP5 cp5;
-Client arduino;
-Client angleclient;
-String data;
+Client client;
+
 PFont font1;
 
 void setup() {
@@ -12,11 +11,9 @@ void setup() {
   size(300, 300);
   cp5 = new ControlP5(this);
   arduino = new Client(this, "192.168.4.1", 4800);
-  angleclient = new Client(this, "192.168.4.1", 5000);
-  arduino.write("hello");
-  angleclient.write("hello");
+  client.write("hello");
 
-font1 = createFont("Metal Gear", 20); //this uses a custom font BEWARE
+  font1 = createFont("Metal Gear", 20); //this uses a custom font BEWARE
 
   cp5.addButton("Go")
      .setValue(0)
@@ -32,31 +29,23 @@ font1 = createFont("Metal Gear", 20); //this uses a custom font BEWARE
 }
 
 void draw() {
-  if (angleclient.available() > 0) {
-      String angle = angleclient.readString();
-      // print out the buggy speed if received by server
-      print("The wheels moved ");
-      print(angle);
-      println("degrees");
-  }
-  
+
   if (client.available() > 0) {
-    String speed = client.readString();
-    print("Buggy speed is ");
-    print(speed);
-    println("cm/s");
+    String data = client.readString();
+    print(data);
+  }
 }
 
 public void Go(int theValue) {
   if (arduino.active()) {
-    arduino.write("w");
+    client.write("w");
     println("Go");
   }
 }
 
 public void Stop(int theValue) {
   if (arduino.active()) {
-    arduino.write("s");
+    client.write("s");
     println("Stop");
   }
 }
