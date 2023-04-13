@@ -37,14 +37,14 @@ void draw() {
 }
 
 public void Go(int theValue) {
-  if (arduino.active()) {
+  if (client.active()) {
     client.write("w");
     println("Go");
   }
 }
 
 public void Stop(int theValue) {
-  if (arduino.active()) {
+  if (client.active()) {
     client.write("s");
     println("Stop");
   }
